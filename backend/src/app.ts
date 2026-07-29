@@ -16,11 +16,10 @@ export const app = express();
 
 app.use(
   cors({
-    frontendUrl: process.env.FRONTEND_URL || "http://localhost:5173",
+    origin: config.frontendUrl,
     credentials: true,
   })
 );
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
