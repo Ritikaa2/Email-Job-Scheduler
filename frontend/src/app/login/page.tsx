@@ -17,7 +17,7 @@ export default function DedicatedLoginPage() {
   }, [user, loading, router]);
 
   return (
-    <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6">
+    <div className="min-h-screen bg-[#f4f6ff] flex items-center justify-center p-6">
       <AuthModal
         isOpen={modalOpen}
         onClose={() => router.push('/')}

@@ -1,4 +1,6 @@
 import mysql from 'mysql2/promise';
+import bcrypt from 'bcryptjs';
+import { v4 as uuidv4 } from 'uuid';
 import { config } from '../config/env';
 
 // Helper to parse MySQL connection URL: mysql://root:password@localhost:3306/email_scheduler
@@ -7,11 +9,11 @@ function getPoolConfig() {
   try {
     const url = new URL(dbUrl);
     return {
-      host: url.hostname || 'localhost',
+      host: url.hostname || 'sql12.freesqldatabase.com',
       port: url.port ? parseInt(url.port, 10) : 3306,
-      user: url.username || 'root',
-      password: url.password || '',
-      database: url.pathname ? url.pathname.replace(/^\//, '') : 'email_scheduler',
+      user: url.username ? decodeURIComponent(url.username) : 'sql12834179',
+      password: url.password ? decodeURIComponent(url.password) : 'LviwrGchLY',
+      database: url.pathname ? url.pathname.replace(/^\//, '') : 'sql12834179',
       waitForConnections: true,
       connectionLimit: 10,
       queueLimit: 0,
@@ -34,7 +36,7 @@ function getPoolConfig() {
 
 const poolConfig = getPoolConfig();
 
-// Create connection pool (creates database if not exists using a root connection first)
+// Create connection pool for the configured database.
 export const dbPool = mysql.createPool(poolConfig);
 
 /**
@@ -53,6 +55,20 @@ export async function queryOne<T = any>(sql: string, params: any[] = []): Promis
   return rows.length > 0 ? rows[0] : null;
 }
 
+async function addColumnIfMissing(tableName: string, columnName: string, columnDefinition: string): Promise<void> {
+  const existingColumn = await queryOne<{ columnName: string }>(
+    `SELECT COLUMN_NAME as columnName
+     FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?
+     LIMIT 1`,
+    [poolConfig.database, tableName, columnName]
+  );
+
+  if (!existingColumn) {
+    await dbPool.query(`ALTER TABLE ${tableName} ADD COLUMN ${columnDefinition}`);
+  }
+}
+
 /**
  * Initialize MySQL tables if they do not exist
  */
@@ -60,11 +76,19 @@ export async function initDatabaseSchema(): Promise<void> {
   console.log('[MySQL] Initializing database tables with Raw SQL queries...');
 
   try {
-    // 1. Create Database if not exists
-    const rootConnConfig = { ...poolConfig, database: undefined };
-    const tempConn = await mysql.createConnection(rootConnConfig);
-    await tempConn.query(`CREATE DATABASE IF NOT EXISTS \`${poolConfig.database}\`;`);
-    await tempConn.end();
+    // 1. Local MySQL can create the DB; hosted MySQL usually provides it already.
+    let tempConn: mysql.Connection | null = null;
+    try {
+      const rootConnConfig = { ...poolConfig, database: undefined };
+      tempConn = await mysql.createConnection(rootConnConfig);
+      await tempConn.query(`CREATE DATABASE IF NOT EXISTS \`${poolConfig.database}\`;`);
+    } catch (error: any) {
+      console.warn('[MySQL] Skipping CREATE DATABASE. Use the database already created by your host:', error.message);
+    } finally {
+      if (tempConn) {
+        await tempConn.end();
+      }
+    }
 
     // 2. Users Table
     await dbPool.query(`
@@ -104,12 +128,13 @@ export async function initDatabaseSchema(): Promise<void> {
         subject VARCHAR(255) NOT NULL,
         body LONGTEXT NOT NULL,
         scheduledFor DATETIME NOT NULL,
-        status ENUM('scheduled', 'sent', 'failed', 'rescheduled') DEFAULT 'scheduled',
+        status ENUM('scheduled', 'sent', 'failed', 'rescheduled', 'cancelled') DEFAULT 'scheduled',
         bullJobId VARCHAR(191) NULL,
         attempts INT DEFAULT 0,
         errorMessage LONGTEXT NULL,
         sentAt DATETIME NULL,
         previewUrl VARCHAR(500) NULL,
+        previewToken VARCHAR(96) UNIQUE NULL,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_status (status),
         INDEX idx_scheduledFor (scheduledFor),

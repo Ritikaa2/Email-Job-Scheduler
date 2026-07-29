@@ -19,12 +19,16 @@ const scheduleSchema = z.object({
 
 const router = Router();
 
+router.get('/preview/:token', EmailController.previewByToken);
+
 router.use(authMiddleware);
 
 router.post('/schedule', validate(scheduleSchema), EmailController.schedule);
 router.get('/queue-status', EmailController.getQueueStatus);
+router.get('/recent-activity', EmailController.getRecentActivity);
 router.get('/scheduled', EmailController.getScheduled);
 router.get('/sent', EmailController.getSent);
+router.post('/:id/cancel', EmailController.cancelScheduled);
 router.post('/upload-recipients', upload.single('file'), EmailController.uploadRecipients);
 
 export default router;

@@ -1,6 +1,6 @@
 import React from 'react';
 import { EmailStatus } from '@/types';
-import { Clock, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { Clock, CheckCircle, AlertCircle, RefreshCw, Ban } from 'lucide-react';
 
 interface StatusPillProps {
   status: EmailStatus;
@@ -43,6 +43,13 @@ export const StatusPill: React.FC<StatusPillProps> = ({ status, errorMessage }) 
               {errorMessage}
             </span>
           )}
+        </span>
+      );
+    case 'cancelled':
+      return (
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+          <Ban className="h-3.5 w-3.5" />
+          Cancelled
         </span>
       );
     default:

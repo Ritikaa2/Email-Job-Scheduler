@@ -6,7 +6,8 @@ export interface User {
   avatarUrl?: string | null;
 }
 
-export type EmailStatus = 'scheduled' | 'sent' | 'failed' | 'rescheduled';
+export type EmailStatus = 'scheduled' | 'sent' | 'failed' | 'rescheduled' | 'cancelled';
+export type EmailStatusFilter = 'all' | 'scheduled' | 'sent' | 'failed' | 'cancelled';
 
 export interface EmailRecord {
   id: string;
@@ -53,6 +54,7 @@ export interface ScheduleEmailPayload {
 }
 export interface QueueStatus {
   healthy: boolean;
+  mode?: 'redis' | 'memory';
   redis?: string;
   counts?: {
     waiting?: number;
@@ -64,5 +66,14 @@ export interface QueueStatus {
   };
   checkedAt: string;
   error?: string;
+}
+
+export interface RecentActivity {
+  id: string;
+  recipientEmail: string;
+  subject: string;
+  status: EmailStatus;
+  action: 'Email Scheduled' | 'Email Sent' | 'Email Failed' | 'Email Cancelled';
+  occurredAt: string;
 }
 

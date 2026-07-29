@@ -1,9 +1,21 @@
 import Redis from 'ioredis';
 import { config } from '../config/env';
 
-export const redisClient = new Redis(config.redisUrl, {
-  maxRetriesPerRequest: null,
-});
+export const useMemoryQueue = config.redisUrl.trim().toLowerCase() === 'memory';
+
+export const redisClient = useMemoryQueue
+  ? null
+  : new Redis(config.redisUrl, {
+      maxRetriesPerRequest: null,
+    });
+
+const hourlyCounters = new Map<string, { count: number; expiresAt: number }>();
+const senderSlots = new Map<string, number>();
+
+export async function pingQueueStore(): Promise<string> {
+  if (useMemoryQueue) return 'MEMORY';
+  return redisClient!.ping();
+}
 
 export class RateLimiterService {
   /**
@@ -14,22 +26,48 @@ export class RateLimiterService {
     const now = new Date();
     const dateHourStr = now.toISOString().substring(0, 13); // YYYY-MM-DDTHH
     const key = `rate:${senderId}:${dateHourStr}`;
+    const nextHour = new Date(now);
+    nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
+    const retryDelayMs = nextHour.getTime() - now.getTime();
 
-    const count = await redisClient.incr(key);
-    if (count === 1) {
-      // Set TTL to 3600 seconds (1 hour)
-      await redisClient.expire(key, 3600);
+    if (useMemoryQueue) {
+      const existing = hourlyCounters.get(key);
+      const current = existing && existing.expiresAt > now.getTime() ? existing.count : 0;
+
+      if (current + 1 > maxPerHour) {
+        return { allowed: false, retryDelayMs };
+      }
+
+      hourlyCounters.set(key, {
+        count: current + 1,
+        expiresAt: now.getTime() + retryDelayMs + 5000,
+      });
+
+      return { allowed: true, retryDelayMs };
     }
 
-    if (count > maxPerHour) {
-      // Calculate milliseconds until the next hour
-      const nextHour = new Date(now);
-      nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
-      const retryDelayMs = nextHour.getTime() - now.getTime();
-      return { allowed: false, retryDelayMs };
-    }
+    const result = await redisClient!.eval(
+      `
+        local count = redis.call("INCR", KEYS[1])
+        if count == 1 then
+          redis.call("PEXPIRE", KEYS[1], ARGV[2] + 5000)
+        end
+        if count > tonumber(ARGV[1]) then
+          redis.call("DECR", KEYS[1])
+          return {0, ARGV[2]}
+        end
+        return {1, ARGV[2]}
+      `,
+      1,
+      key,
+      maxPerHour,
+      retryDelayMs
+    ) as [number, number];
 
-    return { allowed: true };
+    return {
+      allowed: Number(result[0]) === 1,
+      retryDelayMs: Number(result[1]),
+    };
   }
 
   /**
@@ -37,18 +75,46 @@ export class RateLimiterService {
    * If minimum delay has not elapsed, sleeps or returns remaining wait time.
    */
   static async enforceMinDelay(senderId: string, minDelayMs: number): Promise<void> {
-    const key = `last_sent:${senderId}`;
-    const lastSent = await redisClient.get(key);
     const now = Date.now();
+    const key = `send_slot:${senderId}`;
 
-    if (lastSent) {
-      const elapsed = now - parseInt(lastSent, 10);
-      if (elapsed < minDelayMs) {
-        const waitTime = minDelayMs - elapsed;
+    if (useMemoryQueue) {
+      const previousSlot = senderSlots.get(key) || 0;
+      const nextSlot = previousSlot + minDelayMs > now ? previousSlot + minDelayMs : now;
+      const waitTime = nextSlot - now;
+      senderSlots.set(key, nextSlot);
+
+      if (waitTime > 0) {
         await new Promise((resolve) => setTimeout(resolve, waitTime));
       }
+
+      return;
     }
 
-    await redisClient.set(key, Date.now().toString(), 'PX', 86400000); // 24h expiration
+    const waitTime = await redisClient!.eval(
+      `
+        local now = tonumber(ARGV[1])
+        local minDelay = tonumber(ARGV[2])
+        local ttl = tonumber(ARGV[3])
+        local previousSlot = tonumber(redis.call("GET", KEYS[1]) or "0")
+        local nextSlot = now
+
+        if previousSlot + minDelay > now then
+          nextSlot = previousSlot + minDelay
+        end
+
+        redis.call("SET", KEYS[1], tostring(nextSlot), "PX", ttl)
+        return nextSlot - now
+      `,
+      1,
+      key,
+      now,
+      minDelayMs,
+      24 * 60 * 60 * 1000
+    ) as number;
+
+    if (waitTime > 0) {
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+    }
   }
 }

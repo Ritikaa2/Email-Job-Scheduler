@@ -13,6 +13,7 @@ export const CsvUploadZone: React.FC<CsvUploadZoneProps> = ({ onEmailsParsed, on
   const [loading, setLoading] = useState(false);
   const [parsedData, setParsedData] = useState<UploadRecipientsResponse | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [fileName, setFileName] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const handleFileUpload = async (file: File) => {
@@ -29,9 +30,14 @@ export const CsvUploadZone: React.FC<CsvUploadZoneProps> = ({ onEmailsParsed, on
       });
 
       setParsedData(response.data);
+      setFileName(file.name);
+      setShowPreview(true);
       onEmailsParsed(response.data.allEmails);
     } catch (err: any) {
+      setParsedData(null);
+      setFileName('');
       setError(err.response?.data?.error || 'Failed to process file.');
+      onClear();
     } finally {
       setLoading(false);
     }
@@ -48,6 +54,7 @@ export const CsvUploadZone: React.FC<CsvUploadZoneProps> = ({ onEmailsParsed, on
   const handleClear = () => {
     setParsedData(null);
     setShowPreview(false);
+    setFileName('');
     setError(null);
     onClear();
   };
@@ -90,16 +97,19 @@ export const CsvUploadZone: React.FC<CsvUploadZoneProps> = ({ onEmailsParsed, on
           </div>
         </div>
       ) : (
-        <div className="border border-indigo-200 dark:border-indigo-900 bg-indigo-50/40 dark:bg-indigo-950/30 rounded-2xl p-4 transition-all">
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 transition-all dark:border-emerald-900 dark:bg-emerald-950/30">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-indigo-600 text-white">
+              <div className="rounded-xl bg-emerald-600 p-2 text-white">
                 <FileText className="w-5 h-5" />
               </div>
               <div>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-600 text-white shadow-sm">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  {parsedData.count} recipient{parsedData.count === 1 ? '' : 's'} detected
+                <p className="max-w-[190px] truncate text-xs font-bold text-slate-900 dark:text-white" title={fileName}>
+                  {fileName || 'Recipient file'}
+                </p>
+                <span className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-emerald-600 px-3 py-1 text-xs font-bold text-white shadow-sm">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  {parsedData.count} ready to schedule
                 </span>
               </div>
             </div>
@@ -108,7 +118,7 @@ export const CsvUploadZone: React.FC<CsvUploadZoneProps> = ({ onEmailsParsed, on
               <button
                 type="button"
                 onClick={() => setShowPreview(!showPreview)}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100/50 dark:hover:bg-indigo-900/40 transition-colors"
+                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-100 dark:text-emerald-300 dark:hover:bg-emerald-900/40"
               >
                 {showPreview ? 'Hide preview' : 'View preview'}
                 {showPreview ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -125,16 +135,20 @@ export const CsvUploadZone: React.FC<CsvUploadZoneProps> = ({ onEmailsParsed, on
             </div>
           </div>
 
+          <p className="mt-3 text-xs leading-5 text-emerald-800 dark:text-emerald-200">
+            These recipients are now selected. Click Schedule Email and the app will create one scheduled job per email.
+          </p>
+
           {showPreview && (
-            <div className="mt-3 pt-3 border-t border-indigo-100 dark:border-indigo-900/50">
-              <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-2">
+            <div className="mt-3 border-t border-emerald-100 pt-3 dark:border-emerald-900/50">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                 Preview (First {Math.min(10, parsedData.previewEmails.length)})
               </p>
               <div className="max-h-36 overflow-y-auto space-y-1.5 pr-2">
                 {parsedData.previewEmails.map((email, idx) => (
                   <div
                     key={idx}
-                    className="text-xs px-2.5 py-1 bg-white dark:bg-slate-900 border border-indigo-100 dark:border-indigo-950 rounded-lg text-slate-700 dark:text-slate-300 font-mono"
+                    className="rounded-lg border border-emerald-100 bg-white px-2.5 py-1 font-mono text-xs text-slate-700 dark:border-emerald-950 dark:bg-slate-900 dark:text-slate-300"
                   >
                     {email}
                   </div>

@@ -1,12 +1,22 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Bold, CalendarDays, Italic, Link, List, Loader2, Send, Underline, X } from 'lucide-react';
+import { apiClient } from '@/lib/apiClient';
+import { CsvUploadZone } from './CsvUploadZone';
 
 const toLocalDateTimeInput = (date: Date) => {
   const offsetMs = date.getTimezoneOffset() * 60000;
   return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16);
 };
-import { X, Send, Clock, ShieldAlert, Loader2 } from 'lucide-react';
-import { CsvUploadZone } from './CsvUploadZone';
-import { apiClient } from '@/lib/apiClient';
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
+const escapeAttribute = (value: string) => escapeHtml(value).replace(/`/g, '&#096;');
 
 interface ComposeEmailModalProps {
   isOpen: boolean;
@@ -23,6 +33,12 @@ export const ComposeEmailModal: React.FC<ComposeEmailModalProps> = ({
 }) => {
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
+  const [activeFormats, setActiveFormats] = useState({
+    bold: false,
+    italic: false,
+    underline: false,
+    unorderedList: false,
+  });
   const [manualRecipients, setManualRecipients] = useState('');
   const [parsedRecipients, setParsedRecipients] = useState<string[]>([]);
   const [startTime, setStartTime] = useState(() => {
@@ -30,21 +46,92 @@ export const ComposeEmailModal: React.FC<ComposeEmailModalProps> = ({
     now.setMinutes(now.getMinutes() + 2);
     return toLocalDateTimeInput(now);
   });
-  const [delayValue, setDelayValue] = useState(1);
+  const [delayValue, setDelayValue] = useState(2);
   const [delayUnit, setDelayUnit] = useState<'seconds' | 'minutes'>('seconds');
   const [maxEmailsPerHour, setMaxEmailsPerHour] = useState(100);
   const [submitting, setSubmitting] = useState(false);
+  const editorRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (editorRef.current && editorRef.current.innerHTML !== body) {
+      editorRef.current.innerHTML = body;
+    }
+  }, [body, isOpen]);
 
   if (!isOpen) return null;
 
   const getFinalRecipients = (): string[] => {
-    if (parsedRecipients.length > 0) {
-      return parsedRecipients;
-    }
+    if (parsedRecipients.length > 0) return parsedRecipients;
+
     return manualRecipients
       .split(/[\n,]+/)
-      .map((e) => e.trim())
-      .filter((e) => e.length > 0 && e.includes('@'));
+      .map((email) => email.trim())
+      .filter((email) => email.length > 0 && email.includes('@'));
+  };
+
+  const resetForm = () => {
+    setSubject('');
+    setBody('');
+    setManualRecipients('');
+    setParsedRecipients([]);
+    setDelayValue(2);
+    setDelayUnit('seconds');
+    setMaxEmailsPerHour(100);
+  };
+
+  const getBodyText = () => editorRef.current?.innerText.trim() || body.replace(/<[^>]*>/g, '').trim();
+
+  const syncBodyFromEditor = () => {
+    if (!editorRef.current) return;
+    const text = editorRef.current.innerText.trim();
+    setBody(text ? editorRef.current.innerHTML : '');
+  };
+
+  const updateToolbarState = () => {
+    if (typeof document === 'undefined') return;
+
+    setActiveFormats({
+      bold: document.queryCommandState('bold'),
+      italic: document.queryCommandState('italic'),
+      underline: document.queryCommandState('underline'),
+      unorderedList: document.queryCommandState('insertUnorderedList'),
+    });
+  };
+
+  const runFormatCommand = (command: 'bold' | 'italic' | 'underline' | 'insertUnorderedList') => {
+    editorRef.current?.focus();
+    document.execCommand(command, false);
+    syncBodyFromEditor();
+    updateToolbarState();
+  };
+
+  const insertLink = () => {
+    editorRef.current?.focus();
+    const rawUrl = window.prompt('Enter link URL');
+    if (!rawUrl?.trim()) return;
+
+    const normalizedUrl = /^(https?:\/\/|mailto:)/i.test(rawUrl.trim()) ? rawUrl.trim() : `https://${rawUrl.trim()}`;
+    const selection = window.getSelection();
+
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      document.execCommand(
+        'insertHTML',
+        false,
+        `<a href="${escapeAttribute(normalizedUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(normalizedUrl)}</a>`
+      );
+    } else {
+      document.execCommand('createLink', false, normalizedUrl);
+    }
+
+    syncBodyFromEditor();
+    updateToolbarState();
+  };
+
+  const handleBodyPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    document.execCommand('insertText', false, text);
+    syncBodyFromEditor();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -55,16 +142,16 @@ export const ComposeEmailModal: React.FC<ComposeEmailModalProps> = ({
       onError('Subject is required.');
       return;
     }
-    if (!body.trim()) {
+
+    if (!getBodyText()) {
       onError('Email body is required.');
       return;
     }
+
     if (finalRecipients.length === 0) {
       onError('Please provide at least one valid recipient email.');
       return;
     }
-
-    setSubmitting(true);
 
     const selectedStart = new Date(startTime);
     if (Number.isNaN(selectedStart.getTime())) {
@@ -73,25 +160,21 @@ export const ComposeEmailModal: React.FC<ComposeEmailModalProps> = ({
     }
 
     const delayMs = delayUnit === 'minutes' ? delayValue * 60 * 1000 : delayValue * 1000;
-    const isoStartTime = selectedStart.toISOString();
+    setSubmitting(true);
 
     try {
       const response = await apiClient.post('/emails/schedule', {
         subject,
-        body,
+        body: body.trim(),
         recipients: finalRecipients,
-        startTime: isoStartTime,
+        startTime: selectedStart.toISOString(),
         delayBetweenEmailsMs: delayMs,
         maxEmailsPerHour,
       });
 
-      onSuccess(response.data.message || 'Emails scheduled successfully!');
+      onSuccess(response.data.message || 'Emails scheduled successfully.');
+      resetForm();
       onClose();
-      // Reset form
-      setSubject('');
-      setBody('');
-      setManualRecipients('');
-      setParsedRecipients([]);
     } catch (err: any) {
       onError(err.response?.data?.error || 'Failed to schedule emails.');
     } finally {
@@ -102,184 +185,177 @@ export const ComposeEmailModal: React.FC<ComposeEmailModalProps> = ({
   const finalRecipients = getFinalRecipients();
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden bg-slate-950/60 backdrop-blur-sm flex justify-end animate-in fade-in duration-200">
-      <div className="w-full max-w-2xl bg-white dark:bg-slate-900 h-full shadow-2xl flex flex-col border-l border-slate-200 dark:border-slate-800 animate-in slide-in-from-right duration-300">
-        {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <Send className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-              Compose & Schedule Batch
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              Set up staggered email dispatches with rate limits & restart persistence
-            </p>
-          </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/35 p-4 backdrop-blur-sm">
+      <form onSubmit={handleSubmit} className="w-full max-w-5xl overflow-hidden rounded-[8px] border border-slate-200 bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+          <h2 className="text-lg font-bold text-slate-950">Compose New Email</h2>
           <button
+            type="button"
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="rounded-md p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Close compose modal"
           >
-            <X className="w-5 h-5" />
+            <X className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Scrollable Body Form */}
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* Subject */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2">
-              Email Subject *
-            </label>
-            <input
-              type="text"
-              value={subject}
-              onChange={(e) => setSubject(e.target.value)}
-              placeholder="e.g. Q3 Product Update & Feature Announcement"
-              className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-slate-400"
-            />
-          </div>
-
-          {/* Body */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-                Email Body *
-              </label>
-              <span className="text-[11px] text-slate-400 font-mono">{body.length} characters</span>
-            </div>
-            <textarea
-              rows={5}
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder="Write your email content here... (HTML formatting supported)"
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-slate-400 resize-none font-sans"
-            />
-          </div>
-
-          {/* Recipients Section */}
-          <div className="space-y-3">
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
-              Recipients * ({finalRecipients.length} selected)
+        <div className="grid gap-6 p-6 lg:grid-cols-[1fr_340px]">
+          <section className="space-y-5">
+            <label className="block text-xs font-bold text-slate-900">
+              Subject
+              <input
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="Enter email subject"
+                className="mt-2 h-11 w-full rounded-[8px] border border-slate-200 px-3 text-sm font-normal text-slate-900 outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-100"
+              />
             </label>
 
-            <CsvUploadZone
-              onEmailsParsed={(emails) => setParsedRecipients(emails)}
-              onClear={() => setParsedRecipients([])}
-            />
+            <label className="block text-xs font-bold text-slate-900">
+              Email Body
+              <div className="mt-2 overflow-hidden rounded-[8px] border border-slate-200">
+                <div className="flex h-10 items-center gap-1 border-b border-slate-100 bg-slate-50 px-3 text-slate-500">
+                  {[
+                    { icon: Bold, label: 'Bold', action: () => runFormatCommand('bold'), active: activeFormats.bold },
+                    { icon: Italic, label: 'Italic', action: () => runFormatCommand('italic'), active: activeFormats.italic },
+                    { icon: Underline, label: 'Underline', action: () => runFormatCommand('underline'), active: activeFormats.underline },
+                    { icon: List, label: 'Bulleted list', action: () => runFormatCommand('insertUnorderedList'), active: activeFormats.unorderedList },
+                    { icon: Link, label: 'Insert link', action: insertLink, active: false },
+                  ].map(({ icon: Icon, label, action, active }) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={action}
+                      className={`flex h-7 w-7 items-center justify-center rounded-md transition hover:bg-white hover:text-violet-600 ${
+                        active ? 'bg-white text-violet-600 shadow-sm' : ''
+                      }`}
+                      aria-label={label}
+                      title={label}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </button>
+                  ))}
+                </div>
+                <div className="relative">
+                  {!getBodyText() && (
+                    <span className="pointer-events-none absolute left-3 top-3 text-sm font-normal text-slate-400">
+                      Type your email body here...
+                    </span>
+                  )}
+                  <div
+                    ref={editorRef}
+                    contentEditable
+                    role="textbox"
+                    aria-label="Email body"
+                    aria-multiline="true"
+                    onInput={syncBodyFromEditor}
+                    onKeyUp={updateToolbarState}
+                    onMouseUp={updateToolbarState}
+                    onPaste={handleBodyPaste}
+                    className="min-h-[260px] w-full overflow-y-auto px-3 py-3 text-sm font-normal text-slate-900 outline-none [&_a]:text-violet-600 [&_a]:underline [&_li]:ml-5 [&_ul]:list-disc"
+                  />
+                </div>
+              </div>
+            </label>
 
             {parsedRecipients.length === 0 && (
-              <div>
-                <p className="text-[11px] text-slate-500 dark:text-slate-400 mb-1">
-                  Or paste email addresses (comma or newline separated):
-                </p>
+              <label className="block text-xs font-bold text-slate-900">
+                Paste Recipients
                 <textarea
                   rows={3}
                   value={manualRecipients}
                   onChange={(e) => setManualRecipients(e.target.value)}
                   placeholder="alice@example.com, bob@example.com"
-                  className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-900 dark:text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-slate-400 resize-none"
+                  className="mt-2 block w-full resize-none rounded-[8px] border border-slate-200 px-3 py-2 text-xs font-normal text-slate-900 outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-100"
                 />
-              </div>
-            )}
-          </div>
-
-          {/* Scheduling & Rate Limits Grid */}
-          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200/80 dark:border-slate-800/80 space-y-4">
-            <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5 uppercase tracking-wider">
-              <Clock className="w-4 h-4 text-indigo-500" />
-              Schedule & Rate Control
-            </h4>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Start Time */}
-              <div>
-                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
-                  Start Sending At
-                </label>
-                <input
-                  type="datetime-local"
-                  value={startTime}
-                  min={toLocalDateTimeInput(new Date())}
-                  onChange={(e) => setStartTime(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                />
-              </div>
-
-              {/* Delay between emails */}
-              <div>
-                <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1">
-                  Delay Between Sends
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="number"
-                    min="0"
-                    value={delayValue}
-                    onChange={(e) => setDelayValue(Number(e.target.value))}
-                    className="w-1/2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                  />
-                  <select
-                    value={delayUnit}
-                    onChange={(e: any) => setDelayUnit(e.target.value)}
-                    className="w-1/2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                  >
-                    <option value="seconds">Seconds</option>
-                    <option value="minutes">Minutes</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Hourly Rate Limit */}
-            <div>
-              <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400 mb-1 flex items-center justify-between">
-                <span>Max Emails Per Hour</span>
-                <span className="text-[10px] text-slate-400 flex items-center gap-1">
-                  <ShieldAlert className="w-3 h-3 text-amber-500" />
-                  Auto-reschedules overflow to next hour window
-                </span>
               </label>
+            )}
+          </section>
+
+          <section className="space-y-5">
+            <div>
+              <p className="text-xs font-bold text-slate-900">Upload Recipients (CSV/TXT)</p>
+              <div className="mt-2">
+                <CsvUploadZone
+                  onEmailsParsed={(emails) => setParsedRecipients(emails)}
+                  onClear={() => setParsedRecipients([])}
+                />
+              </div>
+              <p className="mt-3 text-sm font-semibold text-emerald-600">
+                {finalRecipients.length.toLocaleString()} email{finalRecipients.length === 1 ? '' : 's'} found
+              </p>
+            </div>
+          </section>
+        </div>
+
+        <div className="grid gap-4 border-t border-slate-100 bg-slate-50/70 px-6 py-5 md:grid-cols-[1.3fr_1fr_1fr_auto] md:items-end">
+          <label className="block text-xs font-bold text-slate-900">
+            Start Time
+            <div className="relative mt-2">
+              <CalendarDays className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
-                type="number"
-                min="1"
-                value={maxEmailsPerHour}
-                onChange={(e) => setMaxEmailsPerHour(Number(e.target.value))}
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                type="datetime-local"
+                value={startTime}
+                min={toLocalDateTimeInput(new Date())}
+                onChange={(e) => setStartTime(e.target.value)}
+                className="h-11 w-full rounded-[8px] border border-slate-200 bg-white px-3 pr-10 text-sm font-normal text-slate-900 outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-100"
               />
             </div>
-          </div>
-        </form>
+          </label>
 
-        {/* Sticky Footer */}
-        <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={submitting}
-            className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 font-medium text-sm hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold text-sm shadow-lg shadow-indigo-500/25 disabled:opacity-50 transition-all active:scale-95"
-          >
-            {submitting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                Scheduling...
-              </>
-            ) : (
-              <>
-                <Send className="w-4 h-4" />
-                Schedule Dispatch
-              </>
-            )}
-          </button>
+          <label className="block text-xs font-bold text-slate-900">
+            Delay Between Emails
+            <div className="mt-2 grid grid-cols-[1fr_1.2fr] gap-2">
+              <input
+                type="number"
+                min="0"
+                value={delayValue}
+                onChange={(e) => setDelayValue(Number(e.target.value))}
+                className="h-11 rounded-[8px] border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-100"
+              />
+              <select
+                value={delayUnit}
+                onChange={(e) => setDelayUnit(e.target.value as 'seconds' | 'minutes')}
+                className="h-11 rounded-[8px] border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-100"
+              >
+                <option value="seconds">seconds</option>
+                <option value="minutes">minutes</option>
+              </select>
+            </div>
+          </label>
+
+          <label className="block text-xs font-bold text-slate-900">
+            Hourly Limit
+            <input
+              type="number"
+              min="1"
+              value={maxEmailsPerHour}
+              onChange={(e) => setMaxEmailsPerHour(Number(e.target.value))}
+              className="mt-2 h-11 w-full rounded-[8px] border border-slate-200 bg-white px-3 text-sm font-normal text-slate-900 outline-none transition focus:border-violet-500 focus:ring-4 focus:ring-violet-100"
+            />
+          </label>
+
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={submitting}
+              className="h-11 rounded-[8px] border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex h-11 items-center gap-2 rounded-[8px] bg-gradient-to-r from-violet-600 to-indigo-600 px-5 text-sm font-bold text-white shadow-lg shadow-violet-500/25 transition hover:from-violet-500 hover:to-indigo-500 disabled:opacity-60"
+            >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              Schedule Email
+            </button>
+          </div>
         </div>
-      </div>
+      </form>
     </div>
   );
 };
-

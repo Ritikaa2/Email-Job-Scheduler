@@ -1,17 +1,25 @@
 import { Worker } from 'bullmq';
-import { EMAIL_QUEUE_NAME, EmailJobData } from './emailQueue';
+import { EMAIL_QUEUE_NAME, EmailJobData, registerMemoryProcessor } from './emailQueue';
 import { processEmailJob } from '../jobs/emailProcessor';
-import { redisClient } from '../services/rateLimiter';
+import { redisClient, useMemoryQueue } from '../services/rateLimiter';
 import { config } from '../config/env';
 
-export function setupWorker(): Worker<EmailJobData> {
+export function setupWorker(): Worker<EmailJobData> | { close: () => Promise<void> } {
+  if (useMemoryQueue) {
+    registerMemoryProcessor(async (job) => {
+      await processEmailJob(job as any);
+    });
+    console.log(`[Worker] In-memory Email Worker initialized with concurrency 1`);
+    return { close: async () => undefined };
+  }
+
   const worker = new Worker<EmailJobData>(
     EMAIL_QUEUE_NAME,
     async (job) => {
       await processEmailJob(job);
     },
     {
-      connection: redisClient,
+      connection: redisClient!,
       concurrency: config.workerConcurrency,
     }
   );
