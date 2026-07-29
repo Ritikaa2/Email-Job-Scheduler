@@ -233,7 +233,9 @@ export class EmailController {
           });
         } catch (error: any) {
           await query(
-            `UPDATE scheduled_emails SET status = 'failed', attempts = 0, errorMessage = ?, updatedAt = NOW() WHERE id = ?`,
+            `UPDATE scheduled_emails
+SET status = 'failed', attempts = 0, errorMessage = ?
+WHERE id = ?`,
             [error.message || 'Queue enqueue failed', emailJobId]
           );
           throw error;
@@ -335,8 +337,8 @@ export class EmailController {
 
       const updateResult = await query<any>(
         `UPDATE scheduled_emails
-         SET status = 'cancelled', errorMessage = NULL, updatedAt = NOW()
-         WHERE id = ? AND userId = ? AND status = 'scheduled'`,
+SET status = 'cancelled', errorMessage = NULL
+WHERE id = ? AND userId = ? AND status = 'scheduled'`,
         [emailId, userId]
       );
 
@@ -384,7 +386,7 @@ export class EmailController {
       query(
         `SELECT * FROM scheduled_emails 
          WHERE ${filters.whereSql} 
-         ORDER BY COALESCE(sentAt, updatedAt, createdAt) DESC LIMIT ? OFFSET ?`,
+         ORDER BY COALESCE(sentAt, createdAt) DESC LIMIT ? OFFSET ?`,
         [...filters.params, limit, offset]
       ),
       queryOne<any>(
@@ -451,10 +453,10 @@ export class EmailController {
             WHEN status = 'cancelled' THEN 'Email Cancelled'
             ELSE 'Email Scheduled'
           END AS action,
-          COALESCE(updatedAt, sentAt, createdAt) AS occurredAt
+          COALESCE(sentAt, createdAt) AS occurredAt
        FROM scheduled_emails
        WHERE userId = ?
-       ORDER BY COALESCE(updatedAt, sentAt, createdAt) DESC
+       ORDER BY COALESCE(sentAt, createdAt) DESC
        LIMIT 10`,
       [userId]
     );
