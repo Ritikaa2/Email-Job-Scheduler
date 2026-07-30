@@ -103,7 +103,7 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
 
     // Update DB status via Raw SQL
     await query(
-      `UPDATE scheduled_emails SET status = 'rescheduled', scheduledFor = ?, WHERE id = ?`,
+      `UPDATE scheduled_emails SET status = 'rescheduled', scheduledFor = ? WHERE id = ?`,
       [newScheduledFor, emailJobId]
     );
 
@@ -190,7 +190,7 @@ WHERE id=?`,
     await query(
       `UPDATE scheduled_emails
 SET status = 'rescheduled',
-    scheduledFor = ?
+    scheduledFor = ?,
 WHERE id = ?`,
       [newStatus, job.attemptsMade + 1, error.message, emailJobId]
     );
