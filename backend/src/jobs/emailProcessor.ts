@@ -119,7 +119,7 @@ const transporter = createTransporter(
 
     console.log("STEP-7 Transporter Created");
 
-    await transporter.verify();
+    // await transporter.verify();
 
     console.log("STEP-8 SMTP Verified");
 
