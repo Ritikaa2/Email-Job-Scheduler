@@ -103,7 +103,7 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
 
     // Update DB status via Raw SQL
     await query(
-      `UPDATE scheduled_emails SET status = 'rescheduled', scheduledFor = ?, updatedAt = NOW() WHERE id = ?`,
+      `UPDATE scheduled_emails SET status = 'rescheduled', scheduledFor = ?, WHERE id = ?`,
       [newScheduledFor, emailJobId]
     );
 
@@ -151,9 +151,14 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
 
     // Update DB on success via Raw SQL
     await query(
-      `UPDATE scheduled_emails 
-       SET status = 'sent', sentAt = NOW(), previewUrl = ?, previewToken = ?, attempts = ?, errorMessage = NULL, updatedAt = NOW() 
-       WHERE id = ?`,
+      `UPDATE scheduled_emails
+SET status='sent',
+    sentAt=NOW(),
+    previewUrl=?,
+    previewToken=?,
+    attempts=?,
+    errorMessage=NULL
+WHERE id=?`,
       [previewUrl, previewToken, job.attemptsMade + 1, emailJobId]
     );
 
@@ -183,7 +188,10 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
     const newStatus = isFinalAttempt ? 'failed' : dbRecord.status;
 
     await query(
-      `UPDATE scheduled_emails SET status = ?, attempts = ?, errorMessage = ?, updatedAt = NOW() WHERE id = ?`,
+      `UPDATE scheduled_emails
+SET status = 'rescheduled',
+    scheduledFor = ?
+WHERE id = ?`,
       [newStatus, job.attemptsMade + 1, error.message, emailJobId]
     );
 
