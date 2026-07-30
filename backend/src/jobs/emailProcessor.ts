@@ -1,18 +1,9 @@
 import { Job } from 'bullmq';
-import nodemailer from 'nodemailer';
 import { EmailJobData, emailQueue } from '../queues/emailQueue';
 import { query, queryOne } from '../db/mysql';
 import { RateLimiterService } from '../services/rateLimiter';
-import { createTransporter } from '../utils/ethereal';
+import { sendEmail } from '../services/emailService';
 import { config } from '../config/env';
-
-function htmlToPlainText(html: string): string {
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
-    .replace(/<[^>]*>/g, '')
-    .trim();
-}
 
 function getDisplayName(record: any): string {
   return record.userName || record.senderName || 'ReachInbox.ai';
@@ -105,33 +96,21 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
 
     console.log("STEP-6 Delay Complete");
 
-    console.log("SMTP User:", dbRecord.smtpUser);
-    console.log("SMTP Host:", config.smtpHost);
-    console.log("SMTP Port:", config.smtpPort);
-    console.log("SMTP Secure:", config.smtpSecure);
-    console.log("SMTP Pass Length:", dbRecord.smtpPass?.length);
+    console.log("STEP-7 Dispatching Email via sendEmail Service");
 
-    const transporter = createTransporter(
-      dbRecord.smtpUser,
-      dbRecord.smtpPass
-    );
-
-    console.log("STEP-7 Transporter Created");
-
-    console.log("STEP-8 Before sendMail");
-
-    const info = await transporter.sendMail({
-      from: `"${getDisplayName(dbRecord)}" <${dbRecord.senderEmail}>`,
+    const sendResult = await sendEmail({
       to: recipientEmail,
       subject,
-      html: body,
-      text: htmlToPlainText(body),
+      body,
+      fromName: getDisplayName(dbRecord),
+      fromEmail: dbRecord.senderEmail,
+      smtpUser: dbRecord.smtpUser,
+      smtpPass: dbRecord.smtpPass,
     });
 
-    console.log("STEP-9 After sendMail");
-    console.log("Message ID:", info.messageId);
+    console.log(`STEP-8 Email Sent successfully (${sendResult.provider}). Message ID:`, sendResult.messageId);
 
-    const previewUrl = nodemailer.getTestMessageUrl(info) || "";
+    const previewUrl = sendResult.previewUrl || "";
 
     await query(
       `UPDATE scheduled_emails
@@ -148,7 +127,7 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
       ]
     );
 
-    console.log("STEP-10 scheduled_emails Updated");
+    console.log("STEP-9 scheduled_emails Updated");
 
     try {
       await query(
@@ -162,12 +141,12 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
           recipientEmail,
           subject,
           body,
-          info.messageId,
+          sendResult.messageId,
           previewUrl,
         ]
       );
 
-      console.log("STEP-11 sent_emails Inserted");
+      console.log("STEP-10 sent_emails Inserted");
     } catch (e: any) {
       console.log("History insert failed:", e.message);
     }

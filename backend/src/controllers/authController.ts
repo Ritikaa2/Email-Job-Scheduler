@@ -9,6 +9,7 @@ import { config } from '../config/env';
 import { query, queryOne } from '../db/mysql';
 import { AuthRequest } from '../middlewares/auth';
 import { createTransporter, getOrCreateSender } from '../utils/ethereal';
+import { sendEmail } from '../services/emailService';
 
 const googleClient = new OAuth2Client(config.googleClientId);
 
@@ -314,13 +315,14 @@ export class AuthController {
       );
 
       const sender = await getOrCreateSender();
-      const transporter = createTransporter(sender.smtpUser, sender.smtpPass);
-      const info = await transporter.sendMail({
-        from: `"ReachInbox.ai" <${sender.email}>`,
+      const sendResult = await sendEmail({
         to: trimmedEmail,
         subject: 'Your ReachInbox password reset OTP',
-        text: `Your ReachInbox.ai password reset OTP is ${resetToken}. It expires in 60 minutes.`,
-        html: `
+        fromName: 'ReachInbox.ai',
+        fromEmail: sender.email,
+        smtpUser: sender.smtpUser,
+        smtpPass: sender.smtpPass,
+        body: `
           <div style="margin:0;padding:0;background:#f6f7fb;font-family:Inter,Arial,sans-serif;color:#111827">
             <div style="max-width:560px;margin:0 auto;padding:32px 16px">
               <div style="overflow:hidden;border-radius:22px;background:#ffffff;border:1px solid #e5e7eb;box-shadow:0 18px 45px rgba(79,70,229,0.14)">
@@ -347,12 +349,11 @@ export class AuthController {
           </div>
         `,
       });
-      const previewUrl = nodemailer.getTestMessageUrl(info);
 
       return res.json({
         message: 'Password reset OTP has been sent to your email.',
         email: user.email,
-        previewUrl: previewUrl ? String(previewUrl) : null,
+        previewUrl: sendResult.previewUrl || null,
       });
     } catch (error: any) {
       console.error('Forgot password error:', error);

@@ -15,7 +15,7 @@ export function setupWorker(): Worker<EmailJobData> | { close: () => Promise<voi
 
   const worker = new Worker<EmailJobData>(
     EMAIL_QUEUE_NAME,
-    async (job) => {
+    async (job: any) => {
       await processEmailJob(job);
     },
     {
@@ -24,11 +24,11 @@ export function setupWorker(): Worker<EmailJobData> | { close: () => Promise<voi
     }
   );
 
-  worker.on('completed', (job) => {
+  worker.on('completed', (job: any) => {
     console.log(`[Worker] Job ${job.id} completed.`);
   });
 
-  worker.on('failed', (job, err) => {
+  worker.on('failed', (job: any, err: any) => {
     console.error(`[Worker] Job ${job?.id} failed with error: ${err.message}`);
   });
 

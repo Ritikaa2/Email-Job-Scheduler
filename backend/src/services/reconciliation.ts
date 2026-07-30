@@ -18,7 +18,7 @@ export async function reconcileOrphanedJobs(): Promise<void> {
     console.log(`[Reconciliation] Found ${scheduledRecords.length} pending records in DB. Verifying with Queue...`);
 
     const activeJobs = await emailQueue.getJobs(['delayed', 'waiting', 'active', 'paused']);
-    const existingJobIds = new Set(activeJobs.map((j) => j.id));
+    const existingJobIds = new Set(activeJobs.map((j: any) => j.id));
 
     let reconciledCount = 0;
 

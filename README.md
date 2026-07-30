@@ -74,6 +74,23 @@ Add `http://localhost:5000/api/auth/google/callback` as an authorized redirect U
 
 Set `SMTP_USER` and `SMTP_PASS` to an Ethereal account if you have one. If they are blank, the backend creates an Ethereal test account on startup and stores it as the default sender.
 
+## EmailJS Setup (Recommended for Render Deployments)
+
+Cloud hosting platforms like Render block outbound SMTP ports (587/465) or get blocked by Gmail SMTP. To send emails reliably on Render:
+
+1. Sign up on [EmailJS.com](https://www.emailjs.com/) and create an Email Service (e.g. connected to Gmail).
+2. Create an Email Template with variables `{{to_email}}`, `{{subject}}`, `{{message}}`, and `{{from_name}}`.
+3. Set the following environment variables in your Render backend service:
+
+```env
+EMAILJS_SERVICE_ID=your_service_id
+EMAILJS_TEMPLATE_ID=your_template_id
+EMAILJS_PUBLIC_KEY=your_public_key
+EMAILJS_PRIVATE_KEY=your_private_key_optional
+```
+
+When EmailJS environment variables are set, the scheduler automatically uses EmailJS REST API to deliver emails.
+
 ## Scheduler Design
 
 Scheduling uses BullMQ delayed jobs only:
