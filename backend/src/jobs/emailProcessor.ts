@@ -1,5 +1,4 @@
 import { Job } from 'bullmq';
-import crypto from 'crypto';
 import nodemailer from 'nodemailer';
 import { EmailJobData, emailQueue } from '../queues/emailQueue';
 import { query, queryOne } from '../db/mysql';
@@ -30,20 +29,20 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
     minDelayBetweenEmailsMs,
   } = job.data;
 
-  console.log(`==============================`);
-  console.log(`[Worker] Processing ${emailJobId}`);
+  console.log("================================");
+  console.log("[Worker] Processing", emailJobId);
 
   try {
     console.log("STEP-1 Loading DB");
 
     const dbRecord = await queryOne<any>(
-      `SELECT se.*, s.name as senderName, s.email as senderEmail,
+      `SELECT se.*, s.name AS senderName, s.email AS senderEmail,
               s.smtpUser, s.smtpPass,
-              u.name as userName
+              u.name AS userName
        FROM scheduled_emails se
-       JOIN senders s ON se.senderId=s.id
-       JOIN users u ON se.userId=u.id
-       WHERE se.id=?`,
+       JOIN senders s ON se.senderId = s.id
+       JOIN users u ON se.userId = u.id
+       WHERE se.id = ?`,
       [emailJobId]
     );
 
@@ -107,21 +106,19 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
     console.log("STEP-6 Delay Complete");
 
     console.log("SMTP User:", dbRecord.smtpUser);
-console.log("SMTP Host:", config.smtpHost);
-console.log("SMTP Port:", config.smtpPort);
-console.log("SMTP Secure:", config.smtpSecure);
-console.log("SMTP Pass Length:", dbRecord.smtpPass?.length);
+    console.log("SMTP Host:", config.smtpHost);
+    console.log("SMTP Port:", config.smtpPort);
+    console.log("SMTP Secure:", config.smtpSecure);
+    console.log("SMTP Pass Length:", dbRecord.smtpPass?.length);
 
-const transporter = createTransporter(
-  dbRecord.smtpUser,
-  dbRecord.smtpPass
-);
+    const transporter = createTransporter(
+      dbRecord.smtpUser,
+      dbRecord.smtpPass
+    );
 
     console.log("STEP-7 Transporter Created");
 
-    // await transporter.verify();
-
-    console.log("STEP-8 SMTP Verified");
+    console.log("STEP-8 Before sendMail");
 
     const info = await transporter.sendMail({
       from: `"${getDisplayName(dbRecord)}" <${dbRecord.senderEmail}>`,
@@ -131,32 +128,27 @@ const transporter = createTransporter(
       text: htmlToPlainText(body),
     });
 
-    console.log("STEP-9 Email Sent");
+    console.log("STEP-9 After sendMail");
+    console.log("Message ID:", info.messageId);
 
-    const previewToken = crypto.randomBytes(32).toString("hex");
-
-    const previewUrl =
-      nodemailer.getTestMessageUrl(info) ||
-      `${config.backendUrl}/api/emails/preview/${previewToken}`;
+    const previewUrl = nodemailer.getTestMessageUrl(info) || "";
 
     await query(
       `UPDATE scheduled_emails
        SET status='sent',
            sentAt=NOW(),
            previewUrl=?,
-           previewToken=?,
            attempts=?,
            errorMessage=NULL
        WHERE id=?`,
       [
         previewUrl,
-        previewToken,
         job.attemptsMade + 1,
         emailJobId,
       ]
     );
 
-    console.log("STEP-10 DB Updated");
+    console.log("STEP-10 scheduled_emails Updated");
 
     try {
       await query(
@@ -174,26 +166,32 @@ const transporter = createTransporter(
           previewUrl,
         ]
       );
+
+      console.log("STEP-11 sent_emails Inserted");
     } catch (e: any) {
       console.log("History insert failed:", e.message);
     }
 
-    console.log("SUCCESS");
+    console.log("EMAIL SENT SUCCESSFULLY");
   } catch (err: any) {
     console.error("EMAIL ERROR:", err);
 
-    await query(
-      `UPDATE scheduled_emails
-       SET status='failed',
-           attempts=?,
-           errorMessage=?
-       WHERE id=?`,
-      [
-        job.attemptsMade + 1,
-        err.message,
-        emailJobId,
-      ]
-    );
+    try {
+      await query(
+        `UPDATE scheduled_emails
+         SET status='failed',
+             attempts=?,
+             errorMessage=?
+         WHERE id=?`,
+        [
+          job.attemptsMade + 1,
+          err.message,
+          emailJobId,
+        ]
+      );
+    } catch (dbErr: any) {
+      console.error("Failed to update DB:", dbErr.message);
+    }
 
     throw err;
   }
