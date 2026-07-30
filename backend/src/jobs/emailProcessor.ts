@@ -106,10 +106,16 @@ export async function processEmailJob(job: Job<EmailJobData>): Promise<void> {
 
     console.log("STEP-6 Delay Complete");
 
-    const transporter = createTransporter(
-      dbRecord.smtpUser,
-      dbRecord.smtpPass
-    );
+    console.log("SMTP User:", dbRecord.smtpUser);
+console.log("SMTP Host:", config.smtpHost);
+console.log("SMTP Port:", config.smtpPort);
+console.log("SMTP Secure:", config.smtpSecure);
+console.log("SMTP Pass Length:", dbRecord.smtpPass?.length);
+
+const transporter = createTransporter(
+  dbRecord.smtpUser,
+  dbRecord.smtpPass
+);
 
     console.log("STEP-7 Transporter Created");
 
