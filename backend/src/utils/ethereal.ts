@@ -75,9 +75,20 @@ export function createTransporter(smtpUser: string, smtpPass: string) {
     host: config.smtpHost,
     port: config.smtpPort,
     secure: config.smtpSecure,
+
     auth: {
       user: smtpUser,
       pass: smtpPass,
     },
+
+    requireTLS: true,
+
+    // Timeouts
+    connectionTimeout: 30000,
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
+
+    // Force IPv4 (helps on some hosting providers)
+    family: 4,
   });
 }
