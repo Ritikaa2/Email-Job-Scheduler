@@ -69,13 +69,17 @@ function DashboardContent() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  useEffect(() => {
-    const token = searchParams.get('token');
-    if (token) {
-      localStorage.setItem('auth_token', token);
-      router.replace('/dashboard');
-    }
-  }, [searchParams, router]);
+ useEffect(() => {
+  const token = searchParams.get("token");
+
+  if (token) {
+    localStorage.setItem("auth_token", token);
+
+    apiClient.defaults.headers.common.Authorization = `Bearer ${token}`;
+
+    router.replace("/dashboard");
+  }
+}, [searchParams, router]);
 
   useEffect(() => {
     if (!authLoading && !user) router.push('/');
