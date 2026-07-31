@@ -11,7 +11,11 @@ import { AuthRequest } from '../middlewares/auth';
 import { createTransporter, getOrCreateSender } from '../utils/ethereal';
 import { sendEmail } from '../services/emailService';
 
-const googleClient = new OAuth2Client(config.googleClientId);
+const googleClient = new OAuth2Client(
+  config.googleClientId,
+  config.googleClientSecret,
+  config.googleCallbackUrl
+);
 
 const authCookieOptions: CookieOptions = {
   httpOnly: true,
