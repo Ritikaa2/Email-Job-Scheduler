@@ -13,12 +13,11 @@ import { sendEmail } from '../services/emailService';
 
 const googleClient = new OAuth2Client(config.googleClientId);
 
-const authCookieOptions: CookieOptions = {
+const clearAuthCookieOptions: CookieOptions = {
   httpOnly: true,
-  sameSite: 'lax',
-  secure: config.frontendUrl.startsWith('https://'),
+  sameSite: 'none',
+  secure: true,
   path: '/',
-  maxAge: 7 * 24 * 60 * 60 * 1000,
 };
 
 const clearAuthCookieOptions: CookieOptions = {
