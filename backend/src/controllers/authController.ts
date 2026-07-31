@@ -458,37 +458,57 @@ export class AuthController {
       if (!payload || !payload.email) {
         return res.status(400).redirect(`${config.frontendUrl}/login?error=InvalidPayload`);
       }
-
-      let user = await queryOne<any>(
+// First check by Google ID
+let user = await queryOne<any>(
   'SELECT * FROM users WHERE googleId = ?',
   [payload.sub]
 );
 
+// If not found, check by email
 if (!user) {
-  const userId = uuidv4();
-  const username = payload.email.split('@')[0];
-  const avatarUrl = payload.picture || null;
-
-  await query(
-    `INSERT INTO users (id, googleId, email, username, name, avatarUrl, createdAt)
-     VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-    [
-      userId,
-      payload.sub,
-      payload.email,
-      username,
-      payload.name || username,
-      avatarUrl,
-    ]
+  user = await queryOne<any>(
+    'SELECT * FROM users WHERE email = ?',
+    [payload.email]
   );
 
-  user = {
-    id: userId,
-    email: payload.email,
-    name: payload.name || username,
-    username,
-    avatarUrl,
-  };
+  if (user) {
+    // Link existing account with Google
+    await query(
+      'UPDATE users SET googleId = ? WHERE id = ?',
+      [payload.sub, user.id]
+    );
+
+    user = await queryOne<any>(
+      'SELECT * FROM users WHERE id = ?',
+      [user.id]
+    );
+  } else {
+    // Create new Google user
+    const userId = uuidv4();
+    const username = payload.email.split('@')[0];
+    const avatarUrl = payload.picture || null;
+
+    await query(
+      `INSERT INTO users (id, googleId, email, username, name, avatarUrl, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        userId,
+        payload.sub,
+        payload.email,
+        username,
+        payload.name || username,
+        avatarUrl,
+      ]
+    );
+
+    user = {
+      id: userId,
+      email: payload.email,
+      name: payload.name || username,
+      username,
+      avatarUrl,
+    };
+  }
 }
 
       const token = jwt.sign({ id: user.id, email: user.email }, config.jwtSecret, { expiresIn: '7d' });
