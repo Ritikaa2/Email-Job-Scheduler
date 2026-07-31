@@ -18,10 +18,16 @@ export function useAuth() {
     }
   };
 
-  useEffect(() => {
-    fetchUser();
-  }, []);
+ useEffect(() => {
+  const token = localStorage.getItem("auth_token");
 
+  if (!token) {
+    setLoading(false);
+    return;
+  }
+
+  fetchUser();
+}, []);
   const logout = async () => {
     try {
       await apiClient.post('/auth/logout');
